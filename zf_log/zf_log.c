@@ -30,6 +30,22 @@
 #else
 	#define ZF_LOG_USE_NSLOG 0
 #endif
+
+/* When defined, OSLog (uses Apple System Log) will be used instead of stderr
+ * (ignored on non-Apple platforms). Date, time, pid and tid (context) will be
+ * provided by os_Log.
+ */
+#ifdef ZF_LOG_USE_APPLE_OSLOG
+	#undef ZF_LOG_USE_APPLE_OSLOG
+	#if defined(__APPLE__) && defined(__MACH__)
+		#define ZF_LOG_USE_APPLE_OSLOG 1
+	#else
+		#define ZF_LOG_USE_APPLE_OSLOG 0
+	#endif
+#else
+	#define ZF_LOG_USE_APPLE_OSLOG 0
+#endif
+
 /* When defined, OutputDebugString() will be used instead of stderr (ignored on
  * non-Windows platforms). Uses OutputDebugStringA() variant and feeds it with
  * UTF-8 data.
@@ -605,6 +621,54 @@ static INSTRUMENTED_CONST buffer_cb g_buffer_cb = buffer_callback;
 	#define OUT_NSLOG OUT_NSLOG_MASK, 0, out_nslog_callback
 #endif
 
+#if ZF_LOG_USE_APPLE_OSLOG
+	#include <os/log.h>
+
+	static INLINE os_log_type_t apple_lvl(const int lvl) {
+		switch (lvl) {
+			case ZF_LOG_VERBOSE:
+				return OS_LOG_TYPE_DEBUG;
+				;
+			case ZF_LOG_DEBUG:
+				return OS_LOG_TYPE_DEBUG;
+				;
+			case ZF_LOG_INFO:
+				return OS_LOG_TYPE_INFO;
+				;
+			case ZF_LOG_WARN:
+				return OS_LOG_TYPE_ERROR;
+				;
+			case ZF_LOG_ERROR:
+				return OS_LOG_TYPE_ERROR;
+				;
+			case ZF_LOG_FATAL:
+				return OS_LOG_TYPE_FAULT;
+				;
+			default:
+				ASSERT_UNREACHABLE("Bad log level");
+				return 0;
+				;
+		}
+	}
+
+	static void out_apple_oslog_callback(const zf_log_message *const msg, void *arg) {
+		VAR_UNUSED(arg);
+		*msg->p = 0;
+		const char *prefix = msg->p;
+		if (msg->tag_e != msg->tag_b)
+		{
+			prefix = msg->tag_b;
+			*msg->tag_e = 0;
+		}
+		os_log_with_type(OS_LOG_DEFAULT, apple_lvl(msg->lvl),
+		 "%{public}s %{public}s", prefix, msg->msg_b);
+	}
+
+	enum { OUT_APPLE_OSLOG_MASK = ZF_LOG_PUT_STD & ~ZF_LOG_PUT_CTX };
+	#define OUT_APPLE_OSLOG OUT_APPLE_OSLOG_MASK, 0, out_apple_oslog_callback
+#endif
+
+
 #if ZF_LOG_USE_DEBUGSTRING
 	#include <windows.h>
 
@@ -653,6 +717,8 @@ static const zf_log_output out_stderr = {ZF_LOG_OUT_STDERR};
 		ZF_LOG_DEFINE_GLOBAL_OUTPUT = {OUT_ANDROID};
 	#elif ZF_LOG_USE_NSLOG
 		ZF_LOG_DEFINE_GLOBAL_OUTPUT = {OUT_NSLOG};
+	#elif ZF_LOG_USE_APPLE_OSLOG
+		ZF_LOG_DEFINE_GLOBAL_OUTPUT = {OUT_APPLE_OSLOG};
 	#elif ZF_LOG_USE_DEBUGSTRING
 		ZF_LOG_DEFINE_GLOBAL_OUTPUT = {OUT_DEBUGSTRING};
 	#else
